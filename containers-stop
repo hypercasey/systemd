@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+source "/home/hyperuser/Defaults"
+
+# Container Engine Binary - You will need
+# to change this if using something other
+# than podman (podman is recommended,
+# specifically Oracle Cloud Infrastructure's 
+# version as these scripts were designed to use 
+# advanced features possibly not available yet
+# for other versions).
+CE_EXEC=$(which podman)
+if [[ ! -f "${CE_EXEC}" ]]; then
+  echo "Container Engine Binary not found."
+  exit 1
+fi
+commitAuthor="Casey Comendant"
+
+function stopContainers {
+  if sudo "${CE_EXEC}" commit -f "${FORMAT}" -a "${commitAuthor}" "${CONTAINER_NAME}" "${REPO}/${CONTAINER_NAME}:${TAG}"; then
+    echo "Container ${CONTAINER_NAME} committed successfully."
+  else
+    echo "Container ${CONTAINER_NAME} commit failed."
+    exit 1
+  fi
+  # Uncomment the following line if you want to
+  # enable archive backups at shutdown:
+  # sudo "${CE_EXEC}" export -o "${nfsMountPoint}/${CONTAINER_NAME}.tar" "${CONTAINER_NAME}"
+  if sudo "${CE_EXEC}" push "${REPO}/${CONTAINER_NAME}:${TAG}" 2> /dev/null; then
+    echo "Container pushed successfully."
+  else
+    echo "Container push failed."
+    exit 1
+  fi
+  return 0
+}
+
+sudo "${CE_EXEC}" login -u "${REPOUSER}" -p "${REPOPASS}" "${ENDPOINT}" &> /dev/null
+stopContainers
+exit 0

@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+if [[ 1111 != "${UID}" ]]; then
+    echo "Wrong UID: ${UID}"
+    exit 1
+else
+  cp -f "${HOME}/hyperstor/valheim-release/Defaults" \
+  "${HOME}/Defaults"
+  source "${HOME}/Defaults" || exit 1
+fi  
+
+CE_EXEC=$(which podman)
+if [[ ! -f "${CE_EXEC}" ]]; then
+  echo "Container Engine Binary not found."
+  exit 1
+fi
+
+containerCheckInterval=66
+checkInterface=10.10.10.100
+
+function getNetworkStatus {
+  [[ 1 == $(ping -c 1 -W 1 "${checkInterface}" | grep -c '100%') ]] && networkDown=true
+  if [[ true == "${networkDown}" ]]; then
+    sleep 11
+    while [[ true == "${networkDown}" ]]; do
+      [[ 0 == $(ping -c 1 -W 1 "${checkInterface}" | grep -c '100%') ]] && unset networkDown
+      continue
+    done
+  else
+    return 0
+  fi
+}
+
+function monitorContainers {
+  # Monitor container status starting any containers that are not running.
+  local containers
+  local status
+  containers=$(sudo "${CE_EXEC}" ps -qa)
+  if [[ ! "${containers}" ]]; then
+    # Squid Caching Proxy
+    sudo "${CE_EXEC}" run --replace --restart "${RESTART_POLICY}" --name squid -i -t -p "${INTERFACE}:8080:3128/tcp" --expose=8080/tcp -m 8g --memory-swap 16g -d "${REPO}/squid:latest"
+    # Valheim Server
+    sudo "${CE_EXEC}" run --security-opt label=disable --privileged --replace --restart "${RESTART_POLICY}" --name valheim-server --env [STEAM_DETAILS="${STEAMUSER} ${STEAMPASS}"] -i -t -p "${INTERFACE}:2456:2456/udp" -p "${INTERFACE}:2456:2456/tcp" -p "${INTERFACE}:2457:2457/udp" -p "${INTERFACE}:2457:2457/tcp" -p "${INTERFACE}:2458:2458/udp" -p "${INTERFACE}:2458:2458/tcp" --expose 2456/udp --expose 2456/tcp --expose 2457/udp --expose 2457/tcp --expose 2458/udp --expose 2458/tcp --memory "${MEMORY}" -d "${REPO}/${CONTAINER_NAME}:${TAG}"
+  else
+    for container in ${containers}; do
+    status=$(sudo "${CE_EXEC}" inspect -f "{{.State.Status}}" "${container}")
+      if [[ "starting" == "${status}" ]]; then
+        continue
+      elif [[ "running" == "${status}" ]]; then
+        continue
+      elif [[ "stopping" == "${status}" ]]; then
+        continue
+      else
+        sudo "${CE_EXEC}" start "${container}"
+        continue
+      fi
+    done
+    sleep "${containerCheckInterval}"
+  fi
+}
+
+sudo "${CE_EXEC}" login -u "${REPOUSER}" -p "${REPOPASS}" "${ENDPOINT}" &> /dev/null
+
+getNetworkStatus
+
+while [[ 0 == "$?" ]]; do
+  monitorContainers
+done
+
+exit 0
